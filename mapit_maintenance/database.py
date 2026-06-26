@@ -61,6 +61,20 @@ def init_db() -> None:
             """
         )
 
+        # Migración automática desde V2/V3: si la tabla ya existía, SQLite no
+        # añade columnas nuevas con CREATE TABLE IF NOT EXISTS. Añadimos las
+        # columnas que falten sin tocar los trayectos ni los contadores guardados.
+        existing = {row[1] for row in con.execute("PRAGMA table_info(processed_emails)").fetchall()}
+        migrations = {
+            "kind": "ALTER TABLE processed_emails ADD COLUMN kind TEXT NOT NULL DEFAULT 'report'",
+            "command": "ALTER TABLE processed_emails ADD COLUMN command TEXT",
+            "inserted_trips": "ALTER TABLE processed_emails ADD COLUMN inserted_trips INTEGER DEFAULT 0",
+            "added_km": "ALTER TABLE processed_emails ADD COLUMN added_km REAL DEFAULT 0",
+        }
+        for column, sql in migrations.items():
+            if column not in existing:
+                con.execute(sql)
+
 
 def get_setting(key: str) -> Optional[str]:
     init_db()

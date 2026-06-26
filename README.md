@@ -1,53 +1,102 @@
-# Mapit PDF Mantenimiento Moto
+# Mapit Gmail Mantenimiento 🏍️
 
-Importa informes PDF de Mapit desde una carpeta de Google Drive, suma kilómetros reales y controla mantenimiento básico de la moto.
+Automatiza el mantenimiento de la moto usando los informes PDF de Mapit que llegan por Gmail.
 
-La gracia de esta versión es que está pensada para Render Cron: baja los PDF de Google Drive, procesa los trayectos nuevos, guarda el histórico en `moto_maintenance.db` y vuelve a subir esa base de datos a la misma carpeta de Drive para no duplicar trayectos aunque Render tenga disco temporal.
+Flujo:
 
-## Estructura recomendada en Google Drive
+1. Mapit envía el email `Tu Informe de Trayectos está listo`.
+2. El cron busca emails nuevos de Mapit.
+3. Extrae el enlace `Ver informe`.
+4. Descarga el PDF.
+5. Importa los trayectos y kilómetros.
+6. Actualiza el contador de mantenimiento.
+7. Envía aviso por ntfy.
 
-Crea una carpeta, por ejemplo:
+## Archivos que subir a GitHub
+
+Sube:
 
 ```text
-Mapit mantenimiento moto/
-  InformeMapit_01-06_25-06.pdf
-  InformeMapit_26-06_30-06.pdf
-  moto_maintenance.db   # la crea/sube el script automáticamente
+mapit_mantenimiento.py
+requirements.txt
+render.yaml
+README.md
+.gitignore
+.env.example
 ```
 
-Puedes subir PDFs por rango de fechas. Si se solapan, no pasa nada: el script deduplica por fecha/hora, coordenadas y distancia.
+No subas:
 
-## Instalación local
-
-```bash
-pip install -r requirements.txt
+```text
+.env
+*.db
+downloads_mapit/
+PDFs de Mapit
 ```
 
-## Configuración Google Drive
+## Variables de entorno en Render
 
-Necesitas una cuenta de servicio de Google Cloud y compartir la carpeta de Drive con el email del service account.
+Obligatorias para Gmail:
 
-Variables necesarias:
-
-```bash
-export GOOGLE_DRIVE_FOLDER_ID="id_de_la_carpeta"
-export GOOGLE_SERVICE_ACCOUNT_JSON="service-account.json"
+```text
+GMAIL_ADDRESS=tu_email@gmail.com
+GMAIL_APP_PASSWORD=contraseña_de_aplicacion
 ```
 
-En Render, en vez de subir el archivo JSON, pega el contenido completo del JSON en la variable `GOOGLE_SERVICE_ACCOUNT_JSON`.
+Recomendadas:
 
-## Uso principal
-
-Procesar carpeta de Google Drive:
-
-```bash
-python mapit_mantenimiento.py importar-drive --ntfy
+```text
+NTFY_TOPIC=tu_topic_ntfy
+GITHUB_TOKEN=github_pat_xxx
+GITHUB_REPO=tu_usuario/tu_repo
+GITHUB_BRANCH=main
+GITHUB_DB_PATH=data/moto_maintenance.db
 ```
 
-Importar una carpeta local:
+## Importante sobre la contraseña de Gmail
+
+No uses tu contraseña normal. Usa una **contraseña de aplicación** de Google.
+
+Ruta habitual:
+
+```text
+Cuenta de Google → Seguridad → Verificación en dos pasos → Contraseñas de aplicaciones
+```
+
+Crea una para este proyecto y pégala en Render como `GMAIL_APP_PASSWORD`.
+
+## Persistencia en Render
+
+Render Cron puede ejecutarse en un entorno temporal. Para no perder la base de datos, el script puede guardar `moto_maintenance.db` dentro del propio repositorio usando la API de GitHub.
+
+Para eso crea un token de GitHub con permiso:
+
+```text
+Contents: Read and write
+```
+
+Y configúralo en Render como `GITHUB_TOKEN`.
+
+El script guardará la DB en:
+
+```text
+data/moto_maintenance.db
+```
+
+No pasa nada si esa ruta no existe: la crea en el primer procesamiento.
+
+## Comandos útiles
+
+Importar desde Gmail:
 
 ```bash
-python mapit_mantenimiento.py importar-carpeta pdfs_mapit --ntfy
+python mapit_mantenimiento.py importar-gmail --ntfy
+```
+
+Importar un PDF manual:
+
+```bash
+python mapit_mantenimiento.py importar InformeMapit_01-06_25-06.pdf
 ```
 
 Ver estado:
@@ -56,59 +105,42 @@ Ver estado:
 python mapit_mantenimiento.py estado
 ```
 
-Registrar engrase de cadena:
+Registrar engrase:
 
 ```bash
-python mapit_mantenimiento.py engrase --nota "Engrasada tras ruta"
+python mapit_mantenimiento.py engrase --nota "Engrasada después de lavar"
 ```
 
 Registrar limpieza de cadena:
 
 ```bash
-python mapit_mantenimiento.py limpieza-cadena
+python mapit_mantenimiento.py limpieza-cadena --nota "Limpieza completa"
 ```
 
-Registrar revisión/cambio aceite:
+Registrar revisión:
 
 ```bash
-python mapit_mantenimiento.py revision --tipo aceite --km-actuales 12000
+python mapit_mantenimiento.py revision --tipo aceite --nota "Revisión anual"
 ```
 
-## Variables opcionales
+## Búsqueda de emails
 
-```bash
-export MAPIT_DB="moto_maintenance.db"
-export GOOGLE_DRIVE_DOWNLOAD_DIR="pdfs_mapit"
-export GOOGLE_DRIVE_DB_NAME="moto_maintenance.db"
-export CHAIN_GREASE_INTERVAL_KM="1000"
-export CHAIN_CLEAN_INTERVAL_KM="3000"
-export OIL_INTERVAL_KM="12000"
-export NTFY_TOPIC="tu_topic_ntfy"
-```
-
-## Render Cron
-
-Este proyecto incluye `render.yaml` con:
-
-```bash
-python mapit_mantenimiento.py importar-drive --ntfy
-```
-
-Configura en Render estas variables de entorno:
+Por defecto busca:
 
 ```text
-GOOGLE_DRIVE_FOLDER_ID
-GOOGLE_SERVICE_ACCOUNT_JSON
-NTFY_TOPIC
-CHAIN_GREASE_INTERVAL_KM
-CHAIN_CLEAN_INTERVAL_KM
-OIL_INTERVAL_KM
+(UNSEEN FROM "mapit")
 ```
 
-Horario recomendado inicial:
+Si quieres afinarlo más, en Render puedes poner:
+
+```text
+MAPIT_EMAIL_SEARCH=(UNSEEN FROM "mapit" SUBJECT "Informe")
+```
+
+## Cron recomendado
+
+Una vez al día por la noche:
 
 ```text
 0 22 * * *
 ```
-
-Una ejecución diaria por la noche es suficiente si subes los PDFs cuando quieras.

@@ -1,6 +1,6 @@
 services:
   - type: cron
-    name: mapit-mantenimiento-gmail
+    name: mapit-mantenimiento-v4
     env: python
     plan: free
     schedule: "0 22 * * *"

@@ -1,57 +1,69 @@
-# Mapit Mantenimiento V3
+# Mapit Mantenimiento V4
 
-Automatización para importar informes PDF de Mapit desde Gmail y llevar el mantenimiento de la moto por kilómetros.
+Asistente de mantenimiento para la moto usando informes PDF de Mapit por Gmail y comandos rápidos por email.
 
-## Comando Render
+## Render
+
+Cron Job:
 
 ```bash
 python mapit_mantenimiento.py importar-gmail --ntfy
 ```
 
-## Variables
+Variables necesarias:
 
-```env
-GMAIL_ADDRESS=tu_correo@gmail.com
-GMAIL_APP_PASSWORD=contraseña_de_aplicacion_de_gmail
-NTFY_TOPIC=tu_topic_ntfy
-NTFY_TITLE=Mapit mantenimiento
-GITHUB_TOKEN=github_pat_xxx
-GITHUB_REPO=shade086-dot/mapit-pdf-mantenimiento
+```text
+GMAIL_ADDRESS
+GMAIL_APP_PASSWORD
+NTFY_TOPIC
+GITHUB_TOKEN
+GITHUB_REPO
 GITHUB_BRANCH=main
-GITHUB_DB_PATH=data/moto_maintenance.db
+NTFY_TITLE=Mapit mantenimiento
 ```
 
 ## Comandos por email
 
-Envíate un correo a ti mismo con uno de estos asuntos:
+Envíate un correo con uno de estos asuntos:
 
 ```text
+mapit estado
 mapit engrase
 mapit limpieza
 mapit aceite
 mapit revision
-mapit estado
-mapit neumaticos
 mapit itv
+mapit neumaticos
+mapit repostaje
+mapit historial
+mapit stats
 ```
 
-El cuerpo del correo se guarda como nota.
+El cuerpo del correo se guarda como nota. Si escribes algo como `18540 km`, se guarda como odómetro opcional del evento.
 
 ## Contadores
 
-- `mapit engrase`: reinicia solo contador de engrase de cadena.
-- `mapit limpieza`: reinicia solo contador de limpieza de cadena.
-- `mapit aceite`: reinicia contador de aceite/revisión.
-- `mapit revision`: registra revisión general, no reinicia contadores específicos.
-- `mapit estado`: no modifica nada.
-- `mapit itv`: registra ITV, no modifica contadores.
-- `mapit neumaticos`: registra neumáticos y empieza a contar km para ese juego.
+Los contadores se respetan mediante `trip_total_km`: cada mantenimiento registra en qué total importado se hizo. Después el contador se calcula como:
 
-## Recordatorios
+```text
+km actuales importados - km importados en el último evento
+```
 
-Si pasan varios días sin informes nuevos, ntfy recordará generar un informe de Mapit.
+Así `mapit engrase` reinicia solo engrase; `mapit limpieza` reinicia solo limpieza; `mapit aceite` reinicia solo aceite/revisión.
 
-```env
-REPORT_REMINDER_DAYS=7
-REMINDER_COOLDOWN_DAYS=3
+## Recordatorios ntfy
+
+Las notificaciones incluyen:
+
+- estado de cadena, limpieza y aceite,
+- recordatorio de generar informe de Mapit,
+- comandos rápidos disponibles por correo.
+
+## Comandos manuales Render Shell
+
+```bash
+python mapit_mantenimiento.py estado
+python mapit_mantenimiento.py historial
+python mapit_mantenimiento.py stats
+python mapit_mantenimiento.py engrase --nota "Engrase cadena"
 ```

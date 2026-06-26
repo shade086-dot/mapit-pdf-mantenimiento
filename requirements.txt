@@ -1,0 +1,5 @@
+pdfplumber>=0.11.0
+pypdf>=5.0.0
+requests>=2.31.0
+google-api-python-client>=2.140.0
+google-auth>=2.33.0

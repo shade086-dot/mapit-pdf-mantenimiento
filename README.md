@@ -67,3 +67,14 @@ python mapit_mantenimiento.py historial
 python mapit_mantenimiento.py stats
 python mapit_mantenimiento.py engrase --nota "Engrase cadena"
 ```
+
+
+## V4.1 estabilidad
+
+Cambios incluidos:
+
+- No envía ntfy cuando no hay informes ni comandos nuevos, salvo recordatorio inteligente y con cooldown.
+- Cooldown de recordatorios configurable con `REMINDER_COOLDOWN_HOURS` (por defecto 48h).
+- Migración automática de la DB antigua y subida a GitHub para que no vuelva a aparecer el error `processed_emails has no column named kind`.
+- Comando nuevo: `mapit ayuda`.
+- Se mantienen los contadores existentes; no borra rutas ni mantenimientos.

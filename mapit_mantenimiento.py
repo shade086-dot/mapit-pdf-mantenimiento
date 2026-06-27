@@ -9,6 +9,7 @@ from mapit_maintenance.gmail_service import import_from_gmail
 from mapit_maintenance.maintenance import add_event, build_history_text, build_month_stats_text, build_status_text, import_pdf
 from mapit_maintenance.notifications import send_ntfy
 from mapit_maintenance.reminders import append_footer
+from mapit_maintenance.database import clear_migration_flag, init_db, was_migrated
 
 
 def main() -> None:
@@ -39,6 +40,10 @@ def main() -> None:
         return
 
     github_storage.download_db()
+    clear_migration_flag()
+    init_db()
+    if was_migrated():
+        github_storage.upload_db("Migra DB mantenimiento Mapit")
 
     if args.cmd == "importar":
         inserted, skipped, added, total = import_pdf(args.pdf)

@@ -6,6 +6,8 @@ from typing import Optional
 
 from .config import DB_PATH
 
+_MIGRATED = False
+
 
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -15,6 +17,7 @@ def db() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    global _MIGRATED
     with db() as con:
         con.executescript(
             """
@@ -74,6 +77,16 @@ def init_db() -> None:
         for column, sql in migrations.items():
             if column not in existing:
                 con.execute(sql)
+                _MIGRATED = True
+
+
+def was_migrated() -> bool:
+    return _MIGRATED
+
+
+def clear_migration_flag() -> None:
+    global _MIGRATED
+    _MIGRATED = False
 
 
 def get_setting(key: str) -> Optional[str]:

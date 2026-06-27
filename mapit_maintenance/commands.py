@@ -20,6 +20,25 @@ def parse_odometer(text: str) -> Optional[float]:
     return float(m.group(1).replace(".", "").replace(",", ".")) if m else None
 
 
+def build_help_text() -> str:
+    return "\n".join([
+        "📌 Comandos Mapit por email",
+        "Asunto: mapit estado",
+        "Asunto: mapit engrase",
+        "Asunto: mapit limpieza",
+        "Asunto: mapit aceite",
+        "Asunto: mapit revision",
+        "Asunto: mapit itv",
+        "Asunto: mapit neumaticos",
+        "Asunto: mapit repostaje",
+        "Asunto: mapit historial",
+        "Asunto: mapit stats",
+        "",
+        "Puedes añadir notas o km en el cuerpo del correo.",
+        "Ejemplo: 18540 km + comentario del mantenimiento.",
+    ])
+
+
 def process_command(subject: str, body: str = "") -> tuple[bool, str, Optional[str]]:
     s = normalize_subject(subject)
     if not s.startswith("mapit"):
@@ -28,6 +47,8 @@ def process_command(subject: str, body: str = "") -> tuple[bool, str, Optional[s
     note = (body or "").strip()
     odo = parse_odometer(note)
 
+    if command in ("ayuda", "help", "comandos"):
+        return True, append_footer(build_help_text()), "ayuda"
     if command in ("estado", "status"):
         return True, append_footer(build_status_text()), "estado"
     if command in ("historial", "history"):
@@ -65,5 +86,5 @@ def process_command(subject: str, body: str = "") -> tuple[bool, str, Optional[s
         add_event("seguro", odo, note or "Seguro")
         return True, append_footer("✅ Seguro registrado.\n\n" + build_history_text(5)), "seguro"
 
-    help_msg = "No reconozco ese comando.\n\nComandos: mapit estado, mapit engrase, mapit limpieza, mapit aceite, mapit revision, mapit itv, mapit neumaticos, mapit repostaje, mapit historial, mapit stats."
+    help_msg = "No reconozco ese comando.\n\n" + build_help_text()
     return True, append_footer(help_msg), "desconocido"

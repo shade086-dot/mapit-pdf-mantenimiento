@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from .config import CHAIN_CLEAN_INTERVAL_KM, CHAIN_GREASE_INTERVAL_KM, OIL_INTERVAL_KM, REPORT_REMINDER_DAYS
-from .database import db, init_db
+from .config import CHAIN_CLEAN_INTERVAL_KM, CHAIN_GREASE_INTERVAL_KM, OIL_INTERVAL_KM, REPORT_REMINDER_DAYS, REMINDER_COOLDOWN_HOURS
+from .database import db, get_setting, init_db, set_setting
 from .maintenance import km_since_event, last_trip_import_date
 
 
@@ -53,6 +53,25 @@ def smart_reminders_text() -> str:
     if not notes:
         return ""
     return "\n".join(["🧠 Recordatorios inteligentes", *notes])
+
+
+def should_send_idle_reminder(key: str = "idle_reminder", cooldown_hours: int = REMINDER_COOLDOWN_HOURS) -> bool:
+    """Devuelve True solo si toca avisar de recordatorios sin novedades.
+
+    Evita enviar ntfy cada vez que el cron no encuentra correos nuevos, que era
+    lo que podía provocar 429 en ntfy durante las pruebas.
+    """
+    now = datetime.now()
+    last_raw = get_setting(key)
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(last_raw)
+            if now - last < timedelta(hours=cooldown_hours):
+                return False
+        except ValueError:
+            pass
+    set_setting(key, now.isoformat(timespec="seconds"))
+    return True
 
 
 def append_footer(message: str) -> str:

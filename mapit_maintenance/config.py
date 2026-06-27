@@ -23,6 +23,7 @@ CHAIN_GREASE_INTERVAL_KM = float(os.getenv("CHAIN_GREASE_INTERVAL_KM", "1000"))
 CHAIN_CLEAN_INTERVAL_KM = float(os.getenv("CHAIN_CLEAN_INTERVAL_KM", "3000"))
 OIL_INTERVAL_KM = float(os.getenv("OIL_INTERVAL_KM", "12000"))
 REPORT_REMINDER_DAYS = int(os.getenv("REPORT_REMINDER_DAYS", "7"))
+REMINDER_COOLDOWN_HOURS = int(os.getenv("REMINDER_COOLDOWN_HOURS", "48"))
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
 # Sin emojis en cabecera: algunos clientes/servidores codifican headers como latin-1.

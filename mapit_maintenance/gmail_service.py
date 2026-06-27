@@ -18,11 +18,11 @@ from .config import (
     MARK_EMAIL_AS_SEEN,
     NTFY_NOTIFY_EMPTY,
 )
-from .database import db, init_db
+from .database import clear_migration_flag, db, init_db, was_migrated
 from .downloader import download_pdf_from_link, find_mapit_report_links
 from .maintenance import build_status_text, import_pdf, total_trip_km
 from .notifications import send_ntfy
-from .reminders import append_footer, smart_reminders_text
+from .reminders import append_footer, should_send_idle_reminder, smart_reminders_text
 
 
 def extract_text_and_html(msg: Message) -> str:
@@ -157,7 +157,9 @@ def process_commands(imap: imaplib.IMAP4_SSL, max_emails: int, send_notification
 
 def import_from_gmail(send_notification: bool = False, max_emails: int = 10) -> str:
     github_storage.download_db()
+    clear_migration_flag()
     init_db()
+    db_was_migrated = was_migrated()
     imap = connect()
     reports_count = commands_count = 0
     try:
@@ -168,7 +170,7 @@ def import_from_gmail(send_notification: bool = False, max_emails: int = 10) -> 
     finally:
         imap.logout()
 
-    if reports_count or commands_count:
+    if reports_count or commands_count or db_was_migrated:
         github_storage.upload_db()
 
     with db() as con:
@@ -177,7 +179,8 @@ def import_from_gmail(send_notification: bool = False, max_emails: int = 10) -> 
     blocks: list[str]
     if not reports_count and not commands_count:
         reminder = smart_reminders_text()
-        if send_notification and (NTFY_NOTIFY_EMPTY or reminder):
+        if send_notification and (NTFY_NOTIFY_EMPTY or (reminder and should_send_idle_reminder())):
+            github_storage.upload_db("Actualiza recordatorio Mapit")
             send_ntfy(append_footer("🏍️ Mapit Gmail\nNo hay informes ni comandos nuevos."), priority="default")
         return "🏍️ Mapit Gmail\nNo hay informes ni comandos nuevos."
 

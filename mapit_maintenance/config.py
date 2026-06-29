@@ -22,12 +22,19 @@ GITHUB_DB_PATH = os.getenv("GITHUB_DB_PATH", "data/moto_maintenance.db").strip()
 CHAIN_GREASE_INTERVAL_KM = float(os.getenv("CHAIN_GREASE_INTERVAL_KM", "1000"))
 CHAIN_CLEAN_INTERVAL_KM = float(os.getenv("CHAIN_CLEAN_INTERVAL_KM", "2000"))
 WHEELS_INTERVAL_KM = float(os.getenv("WHEELS_INTERVAL_KM", "4000"))
-REVISION_INTERVAL_KM = float(os.getenv("REVISION_INTERVAL_KM", os.getenv("OIL_INTERVAL_KM", "120000")))
+REVISION_INTERVAL_KM = float(os.getenv("REVISION_INTERVAL_KM", os.getenv("OIL_INTERVAL_KM", "12000")))
 OIL_INTERVAL_KM = REVISION_INTERVAL_KM  # compatibilidad interna antigua
 REPORT_REMINDER_DAYS = int(os.getenv("REPORT_REMINDER_DAYS", "7"))
 REMINDER_COOLDOWN_HOURS = int(os.getenv("REMINDER_COOLDOWN_HOURS", "48"))
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
-# Sin emojis en cabecera: algunos clientes/servidores codifican headers como latin-1.
 NTFY_TITLE = os.getenv("NTFY_TITLE", "Mapit mantenimiento").strip() or "Mapit mantenimiento"
 NTFY_NOTIFY_EMPTY = os.getenv("NTFY_NOTIFY_EMPTY", "0") == "1"
+NTFY_FALLBACK = os.getenv("NTFY_FALLBACK", "false").lower() in {"1", "true", "yes"}
+
+PUSHOVER_USER = os.getenv("PUSHOVER_USER", os.getenv("PUSHOVER_USER_KEY", "")).strip()
+PUSHOVER_TOKEN = os.getenv("PUSHOVER_TOKEN", os.getenv("PUSHOVER_API_TOKEN", "")).strip()
+PUSHOVER_ENABLED = os.getenv("PUSHOVER_ENABLED", "true").lower() not in {"0", "false", "no"}
+PUSHOVER_DEVICE = os.getenv("PUSHOVER_DEVICE", "").strip()
+PUSHOVER_SOUND = os.getenv("PUSHOVER_SOUND", "").strip()
+PUSHOVER_PRIORITY = os.getenv("PUSHOVER_PRIORITY", "0").strip() or "0"

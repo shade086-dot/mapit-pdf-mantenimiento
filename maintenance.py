@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -86,6 +87,72 @@ def set_real_odometer_km(real_km: float) -> float:
     offset = real_km - raw_km
     set_setting("km_offset", f"{offset:.3f}")
     return offset
+
+
+def set_revision_schedule(last_odometer_km: float | None = None, next_odometer_km: float | None = None) -> None:
+    """Guarda la revisión por odómetro absoluto.
+
+    - last_revision_odometer_km: odómetro cuando se hizo la última revisión.
+    - next_revision_odometer_km: odómetro objetivo de la próxima revisión.
+    """
+    if last_odometer_km is not None:
+        set_setting("last_revision_odometer_km", f"{float(last_odometer_km):.3f}")
+    if next_odometer_km is not None:
+        set_setting("next_revision_odometer_km", f"{float(next_odometer_km):.3f}")
+
+
+def _next_revision_multiple(current_odometer_km: float) -> float:
+    interval = max(1.0, float(REVISION_INTERVAL_KM))
+    return max(interval, math.ceil(max(0.0, current_odometer_km) / interval) * interval)
+
+
+def get_revision_counter(current_odometer_km: float) -> dict:
+    """Revisión basada en odómetro real, no en km Mapit desde último evento.
+
+    Si hay ajustes manuales, usa:
+      - last_revision_odometer_km
+      - next_revision_odometer_km
+    Si no los hay, calcula la próxima revisión como el siguiente múltiplo del
+    intervalo. Ejemplo: 15573 con intervalo 12000 => próxima 24000.
+    """
+    last_setting = _float_setting("last_revision_odometer_km", None)
+    next_setting = _float_setting("next_revision_odometer_km", None)
+    next_km = float(next_setting) if next_setting is not None else _next_revision_multiple(current_odometer_km)
+    if next_km <= current_odometer_km:
+        next_km = _next_revision_multiple(current_odometer_km + 1)
+    last_km = float(last_setting) if last_setting is not None else max(0.0, next_km - REVISION_INTERVAL_KM)
+    # Evita divisiones absurdas si el usuario fija valores inconsistentes.
+    span = max(1.0, next_km - last_km)
+    done = max(0.0, current_odometer_km - last_km)
+    remaining = max(0.0, next_km - current_odometer_km)
+    due = remaining <= 0
+    soon = (not due) and remaining <= span * 0.15
+    return {
+        "km": round(done, 3),
+        "interval_km": round(span, 3),
+        "remaining_km": round(remaining, 3),
+        "due": due,
+        "soon": soon,
+        "level": "due" if due else "soon" if soon else "ok",
+        "last_odometer_km": round(last_km, 3),
+        "target_odometer_km": round(next_km, 3),
+        "current_odometer_km": round(current_odometer_km, 3),
+        "mode": "odometer_absolute",
+    }
+
+
+def last_trip_data_date() -> str | None:
+    """Fecha real del último trayecto importado, no fecha de ejecución del cron."""
+    init_db()
+    with db() as con:
+        row = con.execute("SELECT MAX(end_at) AS last_end FROM trips").fetchone()
+    value = row["last_end"] if row else None
+    if not value:
+        return None
+    text = str(value).strip()
+    # Normaliza a YYYY-MM-DD si la fecha viene con hora.
+    m = text[:10]
+    return m if len(m) == 10 else text
 
 
 def import_pdf(pdf_path: Path) -> tuple[int, int, float, float]:
@@ -189,7 +256,8 @@ def build_status_text() -> str:
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
         wheels_km = km_since_event(con, "ruedas")
-        revision_km = km_since_event(con, "aceite")
+        revision = get_revision_counter(total_km)
+        data_until = last_trip_data_date()
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
         last_wheels = get_last_event(con, "ruedas")
@@ -209,12 +277,13 @@ def build_status_text() -> str:
         counter_line("Engrase cadena", chain_km, CHAIN_GREASE_INTERVAL_KM),
         counter_line("Limpieza cadena", clean_km, CHAIN_CLEAN_INTERVAL_KM),
         counter_line("Ruedas", wheels_km, WHEELS_INTERVAL_KM),
-        counter_line("Revisión/mantenimiento", revision_km, REVISION_INTERVAL_KM),
+        f"✅ Revisión/mantenimiento: próxima {revision['target_odometer_km']:.0f} km — quedan {revision['remaining_km']:.0f} km",
         "",
         f"Último engrase: {last_chain['event_at'] if last_chain else 'sin registrar'}",
         f"Última limpieza: {last_clean['event_at'] if last_clean else 'sin registrar'}",
         f"Últimas ruedas: {last_wheels['event_at'] if last_wheels else 'sin registrar'}",
         f"Última revisión: {last_revision['event_at'] if last_revision else 'sin registrar'}",
+        f"Datos Mapit hasta: {data_until or 'sin datos'}",
     ])
     return "\n".join(lines)
 
@@ -313,7 +382,8 @@ def build_status_payload() -> dict:
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
         wheels_km = km_since_event(con, "ruedas")
-        revision_km = km_since_event(con, "aceite")
+        revision = get_revision_counter(total_km)
+        data_until = last_trip_data_date()
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
         last_wheels = get_last_event(con, "ruedas")
@@ -322,7 +392,6 @@ def build_status_payload() -> dict:
     chain = counter_payload(chain_km, CHAIN_GREASE_INTERVAL_KM)
     clean = counter_payload(clean_km, CHAIN_CLEAN_INTERVAL_KM)
     wheels = counter_payload(wheels_km, WHEELS_INTERVAL_KM)
-    revision = counter_payload(revision_km, REVISION_INTERVAL_KM)
     levels = [chain["level"], clean["level"], wheels["level"], revision["level"]]
     alert_level = "due" if "due" in levels else "soon" if "soon" in levels else "ok"
 
@@ -350,9 +419,10 @@ def build_status_payload() -> dict:
         bar_line("🧽", "Limpieza", clean),
         bar_line("🛞", "Ruedas", wheels),
         bar_line("🔧", "Revisión", revision),
+        f"Próxima revisión: {revision['target_odometer_km']:.0f} km",
     ])
-    if last_report_days is not None:
-        text_block_lines.append(f"Último informe Mapit: hace {last_report_days} días")
+    if data_until:
+        text_block_lines.append(f"Datos Mapit hasta: {data_until}")
 
     if alert_level == "due":
         text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit ruedas / mapit revision")
@@ -379,6 +449,7 @@ def build_status_payload() -> dict:
         "revision": revision,
         "aceite": revision,
         "last_report_days": last_report_days,
+        "mapit_data_until": data_until,
         "ultimo_engrase": last_chain["event_at"] if last_chain else None,
         "ultima_limpieza": last_clean["event_at"] if last_clean else None,
         "ultimas_ruedas": last_wheels["event_at"] if last_wheels else None,

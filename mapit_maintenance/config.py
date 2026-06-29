@@ -20,8 +20,10 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main").strip() or "main"
 GITHUB_DB_PATH = os.getenv("GITHUB_DB_PATH", "data/moto_maintenance.db").strip()
 
 CHAIN_GREASE_INTERVAL_KM = float(os.getenv("CHAIN_GREASE_INTERVAL_KM", "1000"))
-CHAIN_CLEAN_INTERVAL_KM = float(os.getenv("CHAIN_CLEAN_INTERVAL_KM", "3000"))
-OIL_INTERVAL_KM = float(os.getenv("OIL_INTERVAL_KM", "12000"))
+CHAIN_CLEAN_INTERVAL_KM = float(os.getenv("CHAIN_CLEAN_INTERVAL_KM", "2000"))
+WHEELS_INTERVAL_KM = float(os.getenv("WHEELS_INTERVAL_KM", "4000"))
+REVISION_INTERVAL_KM = float(os.getenv("REVISION_INTERVAL_KM", os.getenv("OIL_INTERVAL_KM", "120000")))
+OIL_INTERVAL_KM = REVISION_INTERVAL_KM  # compatibilidad interna antigua
 REPORT_REMINDER_DAYS = int(os.getenv("REPORT_REMINDER_DAYS", "7"))
 REMINDER_COOLDOWN_HOURS = int(os.getenv("REMINDER_COOLDOWN_HOURS", "48"))
 

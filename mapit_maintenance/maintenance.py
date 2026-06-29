@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import CHAIN_CLEAN_INTERVAL_KM, CHAIN_GREASE_INTERVAL_KM, OIL_INTERVAL_KM
+from .config import CHAIN_CLEAN_INTERVAL_KM, CHAIN_GREASE_INTERVAL_KM, REVISION_INTERVAL_KM, WHEELS_INTERVAL_KM
 from .database import db, get_setting, init_db, set_setting
 from .pdf_parser import parse_pdf
 
@@ -95,11 +95,6 @@ def add_event(event_type: str, odometer_km: Optional[float] = None, note: str = 
 
 
 def set_counter(event_type: str, km_done: float, note: str = "") -> None:
-    """Fija manualmente los km transcurridos desde un mantenimiento.
-
-    No modifica trayectos ni km totales. Crea un evento de referencia ficticio
-    en el punto adecuado para que el contador marque km_done.
-    """
     init_db()
     km_done = max(0.0, float(km_done))
     with db() as con:
@@ -126,6 +121,19 @@ def counter_line(name: str, km_done: float, interval: float) -> str:
     return f"✅ {name}: {km_done:.0f}/{interval:.0f} km — quedan {left:.0f} km"
 
 
+def bar_line(icon: str, name: str, counter: dict) -> str:
+    interval = max(1.0, float(counter["interval_km"]))
+    km_done = max(0.0, float(counter["km"]))
+    ratio = min(1.0, km_done / interval)
+    filled = int(round(ratio * 10))
+    bar = "█" * filled + "░" * (10 - filled)
+    if counter["due"]:
+        suffix = "TOCA"
+    else:
+        suffix = f"quedan {counter['remaining_km']:.0f} km"
+    return f"{icon} {name:<9} {bar} {suffix}"
+
+
 def build_status_text() -> str:
     init_db()
     with db() as con:
@@ -135,9 +143,11 @@ def build_status_text() -> str:
         trips_count = con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"]
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
+        wheels_km = km_since_event(con, "ruedas")
         revision_km = km_since_event(con, "aceite")
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
+        last_wheels = get_last_event(con, "ruedas")
         last_revision = get_last_event(con, "aceite")
     lines = [
         "🏍️ Estado mantenimiento Mapit",
@@ -150,10 +160,12 @@ def build_status_text() -> str:
         "",
         counter_line("Engrase cadena", chain_km, CHAIN_GREASE_INTERVAL_KM),
         counter_line("Limpieza cadena", clean_km, CHAIN_CLEAN_INTERVAL_KM),
-        counter_line("Revisión/mantenimiento", revision_km, OIL_INTERVAL_KM),
+        counter_line("Ruedas", wheels_km, WHEELS_INTERVAL_KM),
+        counter_line("Revisión/mantenimiento", revision_km, REVISION_INTERVAL_KM),
         "",
         f"Último engrase: {last_chain['event_at'] if last_chain else 'sin registrar'}",
         f"Última limpieza: {last_clean['event_at'] if last_clean else 'sin registrar'}",
+        f"Últimas ruedas: {last_wheels['event_at'] if last_wheels else 'sin registrar'}",
         f"Última revisión: {last_revision['event_at'] if last_revision else 'sin registrar'}",
     ])
     return "\n".join(lines)
@@ -171,10 +183,11 @@ def build_history_text(limit: int = 12) -> str:
     names = {
         "engrase_cadena": "Engrase cadena",
         "limpieza_cadena": "Limpieza cadena",
+        "ruedas": "Ruedas",
+        "neumaticos": "Neumáticos",
         "aceite": "Revisión/mantenimiento",
         "revision": "Revisión",
         "itv": "ITV",
-        "neumaticos": "Neumáticos",
         "repostaje": "Repostaje",
         "presiones": "Presiones",
         "seguro": "Seguro",
@@ -227,12 +240,21 @@ def last_trip_import_date() -> Optional[datetime]:
         return None
 
 
-def build_status_payload() -> dict:
-    """Devuelve estado estructurado para que otros proyectos lo consuman por JSON.
+def counter_payload(km_done: float, interval: float) -> dict:
+    remaining = interval - km_done
+    due = remaining <= 0
+    soon = (not due) and remaining <= interval * 0.15
+    return {
+        "km": round(km_done, 3),
+        "interval_km": round(interval, 3),
+        "remaining_km": round(max(0.0, remaining), 3),
+        "due": due,
+        "soon": soon,
+        "level": "due" if due else "soon" if soon else "ok",
+    }
 
-    Pensado para que el cron de gasolina pueda incluir un bloque corto de moto
-    sin mezclar bases de datos ni lógica entre repositorios.
-    """
+
+def build_status_payload() -> dict:
     init_db()
     with db() as con:
         raw_total_km = total_trip_km(con)
@@ -241,28 +263,18 @@ def build_status_payload() -> dict:
         trips_count = int(con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"])
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
+        wheels_km = km_since_event(con, "ruedas")
         revision_km = km_since_event(con, "aceite")
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
+        last_wheels = get_last_event(con, "ruedas")
         last_revision = get_last_event(con, "aceite")
-
-    def counter_payload(km_done: float, interval: float) -> dict:
-        remaining = interval - km_done
-        due = remaining <= 0
-        soon = (not due) and remaining <= interval * 0.15
-        return {
-            "km": round(km_done, 3),
-            "interval_km": round(interval, 3),
-            "remaining_km": round(max(0.0, remaining), 3),
-            "due": due,
-            "soon": soon,
-            "level": "due" if due else "soon" if soon else "ok",
-        }
 
     chain = counter_payload(chain_km, CHAIN_GREASE_INTERVAL_KM)
     clean = counter_payload(clean_km, CHAIN_CLEAN_INTERVAL_KM)
-    revision = counter_payload(revision_km, OIL_INTERVAL_KM)
-    levels = [chain["level"], clean["level"], revision["level"]]
+    wheels = counter_payload(wheels_km, WHEELS_INTERVAL_KM)
+    revision = counter_payload(revision_km, REVISION_INTERVAL_KM)
+    levels = [chain["level"], clean["level"], wheels["level"], revision["level"]]
     alert_level = "due" if "due" in levels else "soon" if "soon" in levels else "ok"
 
     last_report = last_trip_import_date()
@@ -270,30 +282,30 @@ def build_status_payload() -> dict:
     if last_report:
         last_report_days = (datetime.now() - last_report).days
 
-    text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · quedan {chain['remaining_km']:.0f} km"
     if chain["due"]:
         text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · TOCA engrase"
-    elif chain["soon"]:
+    else:
         text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · quedan {chain['remaining_km']:.0f} km"
 
     text_block_lines = [
-        "🏍️ Moto",
+        "🏍️ Mantenimiento",
         f"Km reales estimados: {total_km:.1f} km",
     ]
     if abs(offset) >= 0.001:
         text_block_lines.append(f"Km Mapit: {raw_total_km:.1f} km · ajuste {offset:+.1f} km")
     text_block_lines.extend([
-        f"Cadena: {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km — quedan {chain['remaining_km']:.0f} km",
-        f"Limpieza: {clean_km:.0f}/{CHAIN_CLEAN_INTERVAL_KM:.0f} km — quedan {clean['remaining_km']:.0f} km",
-        f"Revisión: {revision_km:.0f}/{OIL_INTERVAL_KM:.0f} km — quedan {revision['remaining_km']:.0f} km",
+        bar_line("⛓️", "Cadena", chain),
+        bar_line("🧽", "Limpieza", clean),
+        bar_line("🛞", "Ruedas", wheels),
+        bar_line("🔧", "Revisión", revision),
     ])
     if last_report_days is not None:
         text_block_lines.append(f"Último informe Mapit: hace {last_report_days} días")
 
     if alert_level == "due":
-        text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit revision")
+        text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit ruedas / mapit revision")
     elif alert_level == "soon":
-        text_block_lines.append("📧 Comandos: mapit engrase · mapit estado")
+        text_block_lines.append("📧 Comandos: mapit actualizar · mapit estado")
 
     return {
         "ok": True,
@@ -307,23 +319,25 @@ def build_status_payload() -> dict:
         "should_show": alert_level != "ok",
         "cadena": chain,
         "limpieza": clean,
+        "ruedas": wheels,
         "revision": revision,
         "aceite": revision,
         "last_report_days": last_report_days,
         "ultimo_engrase": last_chain["event_at"] if last_chain else None,
         "ultima_limpieza": last_clean["event_at"] if last_clean else None,
+        "ultimas_ruedas": last_wheels["event_at"] if last_wheels else None,
         "ultima_revision": last_revision["event_at"] if last_revision else None,
         "ultima_revision_aceite": last_revision["event_at"] if last_revision else None,
         "texto_corto": text_short,
         "texto_bloque": "\n".join(text_block_lines),
         "comandos_rapidos": [
             "mapit estado",
+            "mapit actualizar",
             "mapit engrase",
             "mapit limpieza",
+            "mapit ruedas",
             "mapit revision",
             "mapit km 13100",
-            "mapit ajuste -135",
-            "mapit contador engrase 250",
             "mapit ayuda",
         ],
     }

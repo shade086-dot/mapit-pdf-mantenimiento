@@ -1,6 +1,6 @@
-# Mapit Mantenimiento V4
+# Mapit Mantenimiento V5.1
 
-Asistente de mantenimiento para la moto usando informes PDF de Mapit por Gmail y comandos rápidos por email.
+Asistente de mantenimiento para la moto usando informes PDF de Mapit por Gmail, comandos rápidos por email y salida JSON para el cron de gasolina.
 
 ## Render
 
@@ -30,16 +30,48 @@ Envíate un correo con uno de estos asuntos:
 mapit estado
 mapit engrase
 mapit limpieza
-mapit aceite
 mapit revision
 mapit itv
 mapit neumaticos
 mapit repostaje
 mapit historial
 mapit stats
+mapit ayuda
 ```
 
-El cuerpo del correo se guarda como nota. Si escribes algo como `18540 km`, se guarda como odómetro opcional del evento.
+`mapit revision` registra mantenimiento completo y reinicia el contador de aceite/revisión. El aceite no se toca desde `mapit actualizar` para evitar cambios accidentales.
+
+## Actualizar varios valores con un único email
+
+Asunto:
+
+```text
+mapit actualizar
+```
+
+Cuerpo:
+
+```text
+km=13100
+engrase=500
+limpieza=1200
+```
+
+Significado:
+
+- `km=13100`: fija los km reales estimados. Mapit mantiene sus km brutos y se guarda un ajuste.
+- `engrase=500`: la cadena lleva 500 km desde el último engrase; quedan 500 km hasta 1000.
+- `limpieza=1200`: la limpieza lleva 1200 km; quedan 1800 km hasta 3000.
+- `aceite` se ignora en `mapit actualizar`; usa `mapit revision` para mantenimiento completo.
+
+También puedes usar:
+
+```text
+mapit km 13100
+mapit ajuste -135
+mapit contador engrase 500
+mapit contador limpieza 1200
+```
 
 ## Contadores
 
@@ -49,7 +81,7 @@ Los contadores se respetan mediante `trip_total_km`: cada mantenimiento registra
 km actuales importados - km importados en el último evento
 ```
 
-Así `mapit engrase` reinicia solo engrase; `mapit limpieza` reinicia solo limpieza; `mapit aceite` reinicia solo aceite/revisión.
+Así `mapit engrase` reinicia solo engrase; `mapit limpieza` reinicia solo limpieza; `mapit revision` registra revisión completa/aceite.
 
 ## Recordatorios ntfy
 
@@ -66,19 +98,9 @@ python mapit_mantenimiento.py estado
 python mapit_mantenimiento.py historial
 python mapit_mantenimiento.py stats
 python mapit_mantenimiento.py engrase --nota "Engrase cadena"
+python mapit_mantenimiento.py estado-json
+python mapit_mantenimiento.py estado-corto
 ```
-
-
-## V4.1 estabilidad
-
-Cambios incluidos:
-
-- No envía ntfy cuando no hay informes ni comandos nuevos, salvo recordatorio inteligente y con cooldown.
-- Cooldown de recordatorios configurable con `REMINDER_COOLDOWN_HOURS` (por defecto 48h).
-- Migración automática de la DB antigua y subida a GitHub para que no vuelva a aparecer el error `processed_emails has no column named kind`.
-- Comando nuevo: `mapit ayuda`.
-- Se mantienen los contadores existentes; no borra rutas ni mantenimientos.
-
 
 ## Integración con el cron de gasolina
 
@@ -89,6 +111,4 @@ python mapit_mantenimiento.py estado-json
 python mapit_mantenimiento.py estado-corto
 ```
 
-`estado-json` devuelve campos como `texto_bloque`, `texto_corto`, `alert_level`, `cadena`, `limpieza` y `aceite`.
-
-Recomendación: el cron de gasolina debe mostrar `texto_bloque` solo cada varias notificaciones o siempre que `alert_level` sea `soon` o `due`.
+`estado-json` devuelve campos como `texto_bloque`, `texto_corto`, `alert_level`, `cadena`, `limpieza`, `aceite`, `km_reales_estimados`, `km_mapit` y `km_ajuste`.

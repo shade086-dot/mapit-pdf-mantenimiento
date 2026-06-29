@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -135,10 +135,10 @@ def build_status_text() -> str:
         trips_count = con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"]
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
-        oil_km = km_since_event(con, "aceite")
+        revision_km = km_since_event(con, "aceite")
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
-        last_oil = get_last_event(con, "aceite")
+        last_revision = get_last_event(con, "aceite")
     lines = [
         "🏍️ Estado mantenimiento Mapit",
         f"Trayectos guardados: {trips_count}",
@@ -150,11 +150,11 @@ def build_status_text() -> str:
         "",
         counter_line("Engrase cadena", chain_km, CHAIN_GREASE_INTERVAL_KM),
         counter_line("Limpieza cadena", clean_km, CHAIN_CLEAN_INTERVAL_KM),
-        counter_line("Aceite/revisión", oil_km, OIL_INTERVAL_KM),
+        counter_line("Revisión/mantenimiento", revision_km, OIL_INTERVAL_KM),
         "",
         f"Último engrase: {last_chain['event_at'] if last_chain else 'sin registrar'}",
         f"Última limpieza: {last_clean['event_at'] if last_clean else 'sin registrar'}",
-        f"Última revisión aceite: {last_oil['event_at'] if last_oil else 'sin registrar'}",
+        f"Última revisión: {last_revision['event_at'] if last_revision else 'sin registrar'}",
     ])
     return "\n".join(lines)
 
@@ -171,7 +171,7 @@ def build_history_text(limit: int = 12) -> str:
     names = {
         "engrase_cadena": "Engrase cadena",
         "limpieza_cadena": "Limpieza cadena",
-        "aceite": "Aceite/revisión",
+        "aceite": "Revisión/mantenimiento",
         "revision": "Revisión",
         "itv": "ITV",
         "neumaticos": "Neumáticos",
@@ -241,10 +241,10 @@ def build_status_payload() -> dict:
         trips_count = int(con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"])
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
-        oil_km = km_since_event(con, "aceite")
+        revision_km = km_since_event(con, "aceite")
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
-        last_oil = get_last_event(con, "aceite")
+        last_revision = get_last_event(con, "aceite")
 
     def counter_payload(km_done: float, interval: float) -> dict:
         remaining = interval - km_done
@@ -261,8 +261,8 @@ def build_status_payload() -> dict:
 
     chain = counter_payload(chain_km, CHAIN_GREASE_INTERVAL_KM)
     clean = counter_payload(clean_km, CHAIN_CLEAN_INTERVAL_KM)
-    oil = counter_payload(oil_km, OIL_INTERVAL_KM)
-    levels = [chain["level"], clean["level"], oil["level"]]
+    revision = counter_payload(revision_km, OIL_INTERVAL_KM)
+    levels = [chain["level"], clean["level"], revision["level"]]
     alert_level = "due" if "due" in levels else "soon" if "soon" in levels else "ok"
 
     last_report = last_trip_import_date()
@@ -285,13 +285,13 @@ def build_status_payload() -> dict:
     text_block_lines.extend([
         f"Cadena: {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km — quedan {chain['remaining_km']:.0f} km",
         f"Limpieza: {clean_km:.0f}/{CHAIN_CLEAN_INTERVAL_KM:.0f} km — quedan {clean['remaining_km']:.0f} km",
-        f"Aceite: {oil_km:.0f}/{OIL_INTERVAL_KM:.0f} km — quedan {oil['remaining_km']:.0f} km",
+        f"Revisión: {revision_km:.0f}/{OIL_INTERVAL_KM:.0f} km — quedan {revision['remaining_km']:.0f} km",
     ])
     if last_report_days is not None:
         text_block_lines.append(f"Último informe Mapit: hace {last_report_days} días")
 
     if alert_level == "due":
-        text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit aceite")
+        text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit revision")
     elif alert_level == "soon":
         text_block_lines.append("📧 Comandos: mapit engrase · mapit estado")
 
@@ -307,18 +307,20 @@ def build_status_payload() -> dict:
         "should_show": alert_level != "ok",
         "cadena": chain,
         "limpieza": clean,
-        "aceite": oil,
+        "revision": revision,
+        "aceite": revision,
         "last_report_days": last_report_days,
         "ultimo_engrase": last_chain["event_at"] if last_chain else None,
         "ultima_limpieza": last_clean["event_at"] if last_clean else None,
-        "ultima_revision_aceite": last_oil["event_at"] if last_oil else None,
+        "ultima_revision": last_revision["event_at"] if last_revision else None,
+        "ultima_revision_aceite": last_revision["event_at"] if last_revision else None,
         "texto_corto": text_short,
         "texto_bloque": "\n".join(text_block_lines),
         "comandos_rapidos": [
             "mapit estado",
             "mapit engrase",
             "mapit limpieza",
-            "mapit aceite",
+            "mapit revision",
             "mapit km 13100",
             "mapit ajuste -135",
             "mapit contador engrase 250",

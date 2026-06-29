@@ -78,3 +78,17 @@ Cambios incluidos:
 - Migración automática de la DB antigua y subida a GitHub para que no vuelva a aparecer el error `processed_emails has no column named kind`.
 - Comando nuevo: `mapit ayuda`.
 - Se mantienen los contadores existentes; no borra rutas ni mantenimientos.
+
+
+## Integración con el cron de gasolina
+
+La V5 añade salidas pensadas para que el proyecto de gasolina pueda mostrar estado de moto sin mezclar proyectos:
+
+```bash
+python mapit_mantenimiento.py estado-json
+python mapit_mantenimiento.py estado-corto
+```
+
+`estado-json` devuelve campos como `texto_bloque`, `texto_corto`, `alert_level`, `cadena`, `limpieza` y `aceite`.
+
+Recomendación: el cron de gasolina debe mostrar `texto_bloque` solo cada varias notificaciones o siempre que `alert_level` sea `soon` o `due`.

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from mapit_maintenance import github_storage
 from mapit_maintenance.gmail_service import import_from_gmail
-from mapit_maintenance.maintenance import add_event, build_history_text, build_month_stats_text, build_status_text, import_pdf
+from mapit_maintenance.maintenance import add_event, build_history_text, build_month_stats_text, build_status_payload, build_status_text, import_pdf
 from mapit_maintenance.notifications import send_ntfy
 from mapit_maintenance.reminders import append_footer
 from mapit_maintenance.database import clear_migration_flag, init_db, was_migrated
@@ -27,6 +28,8 @@ def main() -> None:
     sub.add_parser("estado", help="Muestra estado de mantenimiento")
     sub.add_parser("historial", help="Muestra historial de mantenimiento")
     sub.add_parser("stats", help="Muestra estadísticas del mes")
+    sub.add_parser("estado-json", help="Devuelve estado en JSON para integrar con gasolina")
+    sub.add_parser("estado-corto", help="Devuelve una línea corta para informes externos")
 
     for name in ["engrase", "limpieza-cadena", "revision", "aceite", "itv", "neumaticos", "repostaje"]:
         p = sub.add_parser(name)
@@ -58,6 +61,10 @@ def main() -> None:
         print(append_footer(build_history_text()))
     elif args.cmd == "stats":
         print(append_footer(build_month_stats_text()))
+    elif args.cmd == "estado-json":
+        print(json.dumps(build_status_payload(), ensure_ascii=False, indent=2))
+    elif args.cmd == "estado-corto":
+        print(build_status_payload()["texto_corto"])
     else:
         mapping = {
             "engrase": "engrase_cadena",

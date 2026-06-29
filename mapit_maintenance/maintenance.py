@@ -165,3 +165,91 @@ def last_trip_import_date() -> Optional[datetime]:
         return datetime.fromisoformat(row["last"])
     except ValueError:
         return None
+
+
+def build_status_payload() -> dict:
+    """Devuelve estado estructurado para que otros proyectos lo consuman por JSON.
+
+    Pensado para que el cron de gasolina pueda incluir un bloque corto de moto
+    sin mezclar bases de datos ni lógica entre repositorios.
+    """
+    init_db()
+    with db() as con:
+        total_km = total_trip_km(con)
+        trips_count = int(con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"])
+        chain_km = km_since_event(con, "engrase_cadena")
+        clean_km = km_since_event(con, "limpieza_cadena")
+        oil_km = km_since_event(con, "aceite")
+        last_chain = get_last_event(con, "engrase_cadena")
+        last_clean = get_last_event(con, "limpieza_cadena")
+        last_oil = get_last_event(con, "aceite")
+
+    def counter_payload(km_done: float, interval: float) -> dict:
+        remaining = interval - km_done
+        due = remaining <= 0
+        soon = (not due) and remaining <= interval * 0.15
+        return {
+            "km": round(km_done, 3),
+            "interval_km": round(interval, 3),
+            "remaining_km": round(max(0.0, remaining), 3),
+            "due": due,
+            "soon": soon,
+            "level": "due" if due else "soon" if soon else "ok",
+        }
+
+    chain = counter_payload(chain_km, CHAIN_GREASE_INTERVAL_KM)
+    clean = counter_payload(clean_km, CHAIN_CLEAN_INTERVAL_KM)
+    oil = counter_payload(oil_km, OIL_INTERVAL_KM)
+    levels = [chain["level"], clean["level"], oil["level"]]
+    alert_level = "due" if "due" in levels else "soon" if "soon" in levels else "ok"
+
+    last_report = last_trip_import_date()
+    last_report_days = None
+    if last_report:
+        last_report_days = (datetime.now() - last_report).days
+
+    text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · quedan {chain['remaining_km']:.0f} km"
+    if chain["due"]:
+        text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · TOCA engrase"
+    elif chain["soon"]:
+        text_short = f"Cadena {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km · quedan {chain['remaining_km']:.0f} km"
+
+    text_block_lines = [
+        "🏍️ Moto",
+        f"Km Mapit: {total_km:.1f} km",
+        f"Cadena: {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km — quedan {chain['remaining_km']:.0f} km",
+        f"Limpieza: {clean_km:.0f}/{CHAIN_CLEAN_INTERVAL_KM:.0f} km — quedan {clean['remaining_km']:.0f} km",
+        f"Aceite: {oil_km:.0f}/{OIL_INTERVAL_KM:.0f} km — quedan {oil['remaining_km']:.0f} km",
+    ]
+    if last_report_days is not None:
+        text_block_lines.append(f"Último informe Mapit: hace {last_report_days} días")
+
+    if alert_level == "due":
+        text_block_lines.append("📧 Si ya lo hiciste: mapit engrase / mapit limpieza / mapit aceite")
+    elif alert_level == "soon":
+        text_block_lines.append("📧 Comandos: mapit engrase · mapit estado")
+
+    return {
+        "ok": True,
+        "source": "mapit_mantenimiento",
+        "km_totales": round(total_km, 3),
+        "trayectos_guardados": trips_count,
+        "alert_level": alert_level,
+        "should_show": alert_level != "ok",
+        "cadena": chain,
+        "limpieza": clean,
+        "aceite": oil,
+        "last_report_days": last_report_days,
+        "ultimo_engrase": last_chain["event_at"] if last_chain else None,
+        "ultima_limpieza": last_clean["event_at"] if last_clean else None,
+        "ultima_revision_aceite": last_oil["event_at"] if last_oil else None,
+        "texto_corto": text_short,
+        "texto_bloque": "\n".join(text_block_lines),
+        "comandos_rapidos": [
+            "mapit estado",
+            "mapit engrase",
+            "mapit limpieza",
+            "mapit aceite",
+            "mapit ayuda",
+        ],
+    }

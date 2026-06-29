@@ -3,7 +3,15 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .maintenance import add_event, build_history_text, build_month_stats_text, build_status_text
+from .maintenance import (
+    add_event,
+    add_km_offset,
+    build_history_text,
+    build_month_stats_text,
+    build_status_text,
+    set_counter,
+    set_real_odometer_km,
+)
 from .reminders import append_footer
 
 
@@ -14,10 +22,42 @@ def normalize_subject(subject: str) -> str:
 
 
 def parse_odometer(text: str) -> Optional[float]:
-    m = re.search(r"(?:km|kilometros|kilómetros)\D*(\d{3,6}(?:[\.,]\d+)?)", text or "", re.I)
+    m = re.search(r"(?:km|kilometros|kilómetros)\D*(\d{3,7}(?:[\.,]\d+)?)", text or "", re.I)
     if not m:
-        m = re.search(r"(\d{3,6}(?:[\.,]\d+)?)\s*km", text or "", re.I)
+        m = re.search(r"(\d{3,7}(?:[\.,]\d+)?)\s*km", text or "", re.I)
     return float(m.group(1).replace(".", "").replace(",", ".")) if m else None
+
+
+def parse_number(value: str) -> Optional[float]:
+    if value is None:
+        return None
+    m = re.search(r"[-+]?\d+(?:[\.,]\d+)?", str(value))
+    if not m:
+        return None
+    return float(m.group(0).replace(",", "."))
+
+
+def parse_key_values(text: str) -> dict[str, str]:
+    """Lee líneas tipo km=13100, engrase=500, limpieza: 1200."""
+    out: dict[str, str] = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^([a-záéíóúñ_ -]+)\s*[:=]\s*(.+)$", line, re.I)
+        if not m:
+            continue
+        key = normalize_subject(m.group(1)).replace(" ", "_")
+        out[key] = m.group(2).strip()
+    return out
+
+
+def extract_number_from_command(command: str, names: tuple[str, ...]) -> Optional[float]:
+    # Ejemplos: mapit km 13100, mapit ajuste -135, mapit contador engrase 500
+    for name in names:
+        if command.startswith(name):
+            return parse_number(command.replace(name, "", 1))
+    return None
 
 
 def build_help_text() -> str:
@@ -26,17 +66,66 @@ def build_help_text() -> str:
         "Asunto: mapit estado",
         "Asunto: mapit engrase",
         "Asunto: mapit limpieza",
-        "Asunto: mapit aceite",
-        "Asunto: mapit revision",
-        "Asunto: mapit itv",
-        "Asunto: mapit neumaticos",
-        "Asunto: mapit repostaje",
+        "Asunto: mapit revision  (revisión completa / aceite)",
         "Asunto: mapit historial",
         "Asunto: mapit stats",
         "",
-        "Puedes añadir notas o km en el cuerpo del correo.",
-        "Ejemplo: 18540 km + comentario del mantenimiento.",
+        "Ajustes cómodos en un solo correo:",
+        "Asunto: mapit actualizar",
+        "Cuerpo:",
+        "km=13100",
+        "engrase=500",
+        "limpieza=1200",
+        "",
+        "Notas:",
+        "- engrase=500 significa 500 km desde el último engrase; quedan 500 km.",
+        "- aceite solo se registra con mapit revision / mantenimiento completo.",
+        "",
+        "Otros:",
+        "Asunto: mapit km 13100",
+        "Asunto: mapit ajuste -135",
+        "Asunto: mapit contador engrase 500",
+        "Asunto: mapit contador limpieza 1200",
     ])
+
+
+def process_update_command(body: str) -> str:
+    values = parse_key_values(body)
+    actions: list[str] = []
+    note = values.get("nota", "")
+
+    if "km" in values or "odometro" in values or "odómetro" in values:
+        km_value = parse_number(values.get("km") or values.get("odometro") or values.get("odómetro") or "")
+        if km_value is not None:
+            offset = set_real_odometer_km(km_value)
+            actions.append(f"Km reales fijados a {km_value:.0f} km (ajuste {offset:+.1f} km)")
+
+    if "ajuste" in values or "offset" in values:
+        delta = parse_number(values.get("ajuste") or values.get("offset") or "")
+        if delta is not None:
+            offset = add_km_offset(delta)
+            actions.append(f"Ajuste Mapit aplicado: {delta:+.1f} km (total ajuste {offset:+.1f} km)")
+
+    if "engrase" in values or "cadena" in values:
+        km_done = parse_number(values.get("engrase") or values.get("cadena") or "")
+        if km_done is not None:
+            set_counter("engrase_cadena", km_done, note or f"Engrase fijado a {km_done:.0f} km")
+            actions.append(f"Contador engrase fijado a {km_done:.0f} km")
+
+    if "limpieza" in values or "limpieza_cadena" in values:
+        km_done = parse_number(values.get("limpieza") or values.get("limpieza_cadena") or "")
+        if km_done is not None:
+            set_counter("limpieza_cadena", km_done, note or f"Limpieza fijada a {km_done:.0f} km")
+            actions.append(f"Contador limpieza fijado a {km_done:.0f} km")
+
+    # Importante: no procesamos aceite en mapit actualizar para evitar tocarlo por error.
+    if "aceite" in values:
+        actions.append("Aceite ignorado en mapit actualizar; usa mapit revision para mantenimiento completo")
+
+    if not actions:
+        return append_footer("No he encontrado cambios en el cuerpo. Usa por ejemplo:\nkm=13100\nengrase=500\nlimpieza=1200")
+
+    return append_footer("✅ Mapit actualizado\n" + "\n".join(f"- {a}" for a in actions) + "\n\n" + build_status_text())
 
 
 def process_command(subject: str, body: str = "") -> tuple[bool, str, Optional[str]]:
@@ -55,18 +144,48 @@ def process_command(subject: str, body: str = "") -> tuple[bool, str, Optional[s
         return True, append_footer(build_history_text()), "historial"
     if command in ("stats", "estadisticas", "estadísticas"):
         return True, append_footer(build_month_stats_text()), "stats"
+
+    if command in ("actualizar", "sync", "sincronizar"):
+        return True, process_update_command(note), "actualizar"
+
+    km_cmd = extract_number_from_command(command, ("km", "odometro", "odómetro"))
+    if km_cmd is not None:
+        offset = set_real_odometer_km(km_cmd)
+        return True, append_footer(f"✅ Km reales fijados a {km_cmd:.0f} km (ajuste {offset:+.1f} km).\n\n" + build_status_text()), "km"
+
+    ajuste_cmd = extract_number_from_command(command, ("ajuste", "offset"))
+    if ajuste_cmd is not None:
+        offset = add_km_offset(ajuste_cmd)
+        return True, append_footer(f"✅ Ajuste aplicado: {ajuste_cmd:+.1f} km (total ajuste {offset:+.1f} km).\n\n" + build_status_text()), "ajuste"
+
+    m = re.match(r"contador\s+(engrase|cadena|limpieza|limpieza cadena)\s+(.+)$", command)
+    if m:
+        km_done = parse_number(m.group(2))
+        if km_done is not None:
+            if m.group(1) in ("engrase", "cadena"):
+                set_counter("engrase_cadena", km_done, note or f"Contador engrase fijado a {km_done:.0f} km")
+                label = "engrase"
+            else:
+                set_counter("limpieza_cadena", km_done, note or f"Contador limpieza fijado a {km_done:.0f} km")
+                label = "limpieza"
+            return True, append_footer(f"✅ Contador {label} fijado a {km_done:.0f} km.\n\n" + build_status_text()), f"contador_{label}"
+
     if command in ("engrase", "engrase cadena", "cadena"):
         add_event("engrase_cadena", odo, note)
         return True, append_footer("✅ Engrase de cadena registrado.\n\n" + build_status_text()), "engrase_cadena"
     if command in ("limpieza", "limpieza cadena", "limpiar cadena"):
         add_event("limpieza_cadena", odo, note)
         return True, append_footer("✅ Limpieza de cadena registrada.\n\n" + build_status_text()), "limpieza_cadena"
+
+    # Aceite solo en mantenimiento completo / revisión, no en actualización normal.
+    if command in ("revision", "revisión", "mantenimiento", "mantenimiento completo"):
+        add_event("revision", odo, note or "Revisión general")
+        add_event("aceite", odo, note or "Aceite/revisión completa")
+        return True, append_footer("✅ Revisión completa registrada. Aceite/revisión reiniciado.\n\n" + build_status_text()), "revision"
+
     if command in ("aceite", "cambio aceite"):
         add_event("aceite", odo, note or "Cambio aceite")
         return True, append_footer("✅ Aceite/revisión registrado.\n\n" + build_status_text()), "aceite"
-    if command in ("revision", "revisión"):
-        add_event("revision", odo, note or "Revisión general")
-        return True, append_footer("✅ Revisión general registrada.\n\n" + build_status_text()), "revision"
     if command == "itv":
         add_event("itv", odo, note or "ITV")
         return True, append_footer("✅ ITV registrada.\n\n" + build_history_text(5)), "itv"

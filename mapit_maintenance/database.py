@@ -79,6 +79,15 @@ def init_db() -> None:
                 con.execute(sql)
                 _MIGRATED = True
 
+        # Ajuste global de odómetro respecto a Mapit. Por defecto 0, no toca
+        # trayectos ni mantenimientos; solo corrige la lectura mostrada.
+        if con.execute("SELECT 1 FROM reminder_state WHERE key = 'km_offset'").fetchone() is None:
+            con.execute(
+                "INSERT INTO reminder_state (key, value, updated_at) VALUES (?, ?, ?)",
+                ("km_offset", "0", datetime.now().isoformat(timespec="seconds")),
+            )
+            _MIGRATED = True
+
 
 def was_migrated() -> bool:
     return _MIGRATED

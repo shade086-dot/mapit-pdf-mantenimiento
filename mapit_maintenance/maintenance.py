@@ -6,12 +6,42 @@ from pathlib import Path
 from typing import Optional
 
 from .config import CHAIN_CLEAN_INTERVAL_KM, CHAIN_GREASE_INTERVAL_KM, OIL_INTERVAL_KM
-from .database import db, init_db
+from .database import db, get_setting, init_db, set_setting
 from .pdf_parser import parse_pdf
 
 
 def total_trip_km(con: sqlite3.Connection) -> float:
     return float(con.execute("SELECT COALESCE(SUM(distance_km), 0) AS km FROM trips").fetchone()["km"])
+
+
+def get_km_offset() -> float:
+    try:
+        return float(get_setting("km_offset") or "0")
+    except Exception:
+        return 0.0
+
+
+def adjusted_total_km(con: sqlite3.Connection) -> float:
+    return total_trip_km(con) + get_km_offset()
+
+
+def set_km_offset(offset: float) -> None:
+    set_setting("km_offset", f"{offset:.3f}")
+
+
+def add_km_offset(delta: float) -> float:
+    new_offset = get_km_offset() + delta
+    set_km_offset(new_offset)
+    return new_offset
+
+
+def set_real_odometer_km(real_km: float) -> float:
+    init_db()
+    with db() as con:
+        raw_km = total_trip_km(con)
+    offset = real_km - raw_km
+    set_km_offset(offset)
+    return offset
 
 
 def import_pdf(pdf_path: Path) -> tuple[int, int, float, float]:
@@ -38,7 +68,7 @@ def import_pdf(pdf_path: Path) -> tuple[int, int, float, float]:
                 added_km += t.distance_km
             except sqlite3.IntegrityError:
                 skipped += 1
-        total = total_trip_km(con)
+        total = adjusted_total_km(con)
     return inserted, skipped, added_km, total
 
 
@@ -64,6 +94,29 @@ def add_event(event_type: str, odometer_km: Optional[float] = None, note: str = 
         )
 
 
+def set_counter(event_type: str, km_done: float, note: str = "") -> None:
+    """Fija manualmente los km transcurridos desde un mantenimiento.
+
+    No modifica trayectos ni km totales. Crea un evento de referencia ficticio
+    en el punto adecuado para que el contador marque km_done.
+    """
+    init_db()
+    km_done = max(0.0, float(km_done))
+    with db() as con:
+        current_raw = total_trip_km(con)
+        baseline = max(0.0, current_raw - km_done)
+        con.execute(
+            "INSERT INTO maintenance_events (event_type, event_at, odometer_km, trip_total_km, note) VALUES (?, ?, ?, ?, ?)",
+            (
+                event_type,
+                datetime.now().isoformat(timespec="seconds"),
+                None,
+                baseline,
+                (note or f"Contador fijado manualmente a {km_done:.0f} km").strip(),
+            ),
+        )
+
+
 def counter_line(name: str, km_done: float, interval: float) -> str:
     left = interval - km_done
     if left <= 0:
@@ -76,7 +129,9 @@ def counter_line(name: str, km_done: float, interval: float) -> str:
 def build_status_text() -> str:
     init_db()
     with db() as con:
-        total_km = total_trip_km(con)
+        raw_total_km = total_trip_km(con)
+        offset = get_km_offset()
+        total_km = raw_total_km + offset
         trips_count = con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"]
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
@@ -84,10 +139,14 @@ def build_status_text() -> str:
         last_chain = get_last_event(con, "engrase_cadena")
         last_clean = get_last_event(con, "limpieza_cadena")
         last_oil = get_last_event(con, "aceite")
-    return "\n".join([
+    lines = [
         "🏍️ Estado mantenimiento Mapit",
         f"Trayectos guardados: {trips_count}",
-        f"Km totales importados: {total_km:.3f} km",
+        f"Km reales estimados: {total_km:.3f} km",
+    ]
+    if abs(offset) >= 0.001:
+        lines.append(f"Km Mapit: {raw_total_km:.3f} km · Ajuste: {offset:+.3f} km")
+    lines.extend([
         "",
         counter_line("Engrase cadena", chain_km, CHAIN_GREASE_INTERVAL_KM),
         counter_line("Limpieza cadena", clean_km, CHAIN_CLEAN_INTERVAL_KM),
@@ -97,6 +156,7 @@ def build_status_text() -> str:
         f"Última limpieza: {last_clean['event_at'] if last_clean else 'sin registrar'}",
         f"Última revisión aceite: {last_oil['event_at'] if last_oil else 'sin registrar'}",
     ])
+    return "\n".join(lines)
 
 
 def build_history_text(limit: int = 12) -> str:
@@ -175,7 +235,9 @@ def build_status_payload() -> dict:
     """
     init_db()
     with db() as con:
-        total_km = total_trip_km(con)
+        raw_total_km = total_trip_km(con)
+        offset = get_km_offset()
+        total_km = raw_total_km + offset
         trips_count = int(con.execute("SELECT COUNT(*) AS n FROM trips").fetchone()["n"])
         chain_km = km_since_event(con, "engrase_cadena")
         clean_km = km_since_event(con, "limpieza_cadena")
@@ -216,11 +278,15 @@ def build_status_payload() -> dict:
 
     text_block_lines = [
         "🏍️ Moto",
-        f"Km Mapit: {total_km:.1f} km",
+        f"Km reales estimados: {total_km:.1f} km",
+    ]
+    if abs(offset) >= 0.001:
+        text_block_lines.append(f"Km Mapit: {raw_total_km:.1f} km · ajuste {offset:+.1f} km")
+    text_block_lines.extend([
         f"Cadena: {chain_km:.0f}/{CHAIN_GREASE_INTERVAL_KM:.0f} km — quedan {chain['remaining_km']:.0f} km",
         f"Limpieza: {clean_km:.0f}/{CHAIN_CLEAN_INTERVAL_KM:.0f} km — quedan {clean['remaining_km']:.0f} km",
         f"Aceite: {oil_km:.0f}/{OIL_INTERVAL_KM:.0f} km — quedan {oil['remaining_km']:.0f} km",
-    ]
+    ])
     if last_report_days is not None:
         text_block_lines.append(f"Último informe Mapit: hace {last_report_days} días")
 
@@ -233,6 +299,9 @@ def build_status_payload() -> dict:
         "ok": True,
         "source": "mapit_mantenimiento",
         "km_totales": round(total_km, 3),
+        "km_reales_estimados": round(total_km, 3),
+        "km_mapit": round(raw_total_km, 3),
+        "km_ajuste": round(offset, 3),
         "trayectos_guardados": trips_count,
         "alert_level": alert_level,
         "should_show": alert_level != "ok",
@@ -250,6 +319,9 @@ def build_status_payload() -> dict:
             "mapit engrase",
             "mapit limpieza",
             "mapit aceite",
+            "mapit km 13100",
+            "mapit ajuste -135",
+            "mapit contador engrase 250",
             "mapit ayuda",
         ],
     }
